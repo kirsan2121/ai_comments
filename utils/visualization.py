@@ -3,6 +3,14 @@ import plotly.express as px
 import pandas as pd
 import numpy as np
 
+# Define color scheme
+COLORS = {
+    'positive': '#34A85A',
+    'negative': '#FF3737',
+    'neutral': '#808080',
+    'grid': '#CCCCCC'
+}
+
 def format_number(number):
     """Format large numbers with K/M/B suffixes"""
     if pd.isna(number):
@@ -279,3 +287,150 @@ def calculate_chain_metrics(df):
     metrics['category_count'] = df['category_name'].nunique()
     
     return metrics
+
+def create_manufacturer_market_comparison(df, selected_producer):
+    """
+    Создает график сравнения динамики цен и объемов продаж производителя с рынком
+    
+    Args:
+        df: DataFrame с данными
+        selected_producer: выбранный производитель для анализа
+    """
+    # Подготовка данных для всего рынка
+    market_metrics = df.groupby('category_name').agg({
+        'current_sales_kg_total': 'sum',
+        'previous_sales_kg_total': 'sum',
+        'current_sales_rub_total': 'sum',
+        'previous_sales_rub_total': 'sum'
+    }).reset_index()
+    
+    # Расчет средних цен по рынку
+    market_metrics['market_price_current'] = market_metrics['current_sales_rub_total'] / market_metrics['current_sales_kg_total']
+    market_metrics['market_price_previous'] = market_metrics['previous_sales_rub_total'] / market_metrics['previous_sales_kg_total']
+    
+    # Расчет изменений для рынка
+    market_metrics['market_price_change'] = ((market_metrics['market_price_current'] / market_metrics['market_price_previous']) - 1) * 100
+    market_metrics['market_volume_change'] = ((market_metrics['current_sales_kg_total'] / market_metrics['previous_sales_kg_total']) - 1) * 100
+    
+    # Подготовка данных для производителя
+    manufacturer_data = df[df['producer_name'] == selected_producer].groupby('category_name').agg({
+        'current_sales_kg_total': 'sum',
+        'previous_sales_kg_total': 'sum',
+        'current_sales_rub_total': 'sum',
+        'previous_sales_rub_total': 'sum'
+    }).reset_index()
+    
+    # Расчет средних цен производителя
+    manufacturer_data['manuf_price_current'] = manufacturer_data['current_sales_rub_total'] / manufacturer_data['current_sales_kg_total']
+    manufacturer_data['manuf_price_previous'] = manufacturer_data['previous_sales_rub_total'] / manufacturer_data['previous_sales_kg_total']
+    
+    # Расчет изменений для производителя
+    manufacturer_data['manuf_price_change'] = ((manufacturer_data['manuf_price_current'] / manufacturer_data['manuf_price_previous']) - 1) * 100
+    manufacturer_data['manuf_volume_change'] = ((manufacturer_data['current_sales_kg_total'] / manufacturer_data['previous_sales_kg_total']) - 1) * 100
+    
+    # Объединение данных
+    merged_data = pd.merge(market_metrics, manufacturer_data, on='category_name', suffixes=('_market', '_manuf'))
+    
+    # Создание графика
+    fig = go.Figure()
+    
+    # Добавляем линии изменения цен
+    fig.add_trace(go.Scatter(
+        x=merged_data['category_name'],
+        y=merged_data['manuf_price_change'],
+        name=f'Изменение цен {selected_producer}',
+        line=dict(color=COLORS['positive'], width=2),
+        yaxis='y1'
+    ))
+    
+    fig.add_trace(go.Scatter(
+        x=merged_data['category_name'],
+        y=merged_data['market_price_change'],
+        name='Изменение цен (рынок)',
+        line=dict(color=COLORS['positive'], dash='dash', width=2),
+        yaxis='y1'
+    ))
+    
+    # Добавляем линии изменения объемов
+    fig.add_trace(go.Scatter(
+        x=merged_data['category_name'],
+        y=merged_data['manuf_volume_change'],
+        name=f'Изменение объемов {selected_producer}',
+        line=dict(color=COLORS['neutral'], width=2),
+        yaxis='y2'
+    ))
+    
+    fig.add_trace(go.Scatter(
+        x=merged_data['category_name'],
+        y=merged_data['market_volume_change'],
+        name='Изменение объемов (рынок)',
+        line=dict(color=COLORS['neutral'], dash='dash', width=2),
+        yaxis='y2'
+    ))
+    
+    # Настройка layout
+    fig.update_layout(
+        title=f'Сравнение динамики цен и объемов: {selected_producer} vs Рынок',
+        height=500,
+        margin=dict(l=20, r=20, t=40, b=20),
+        xaxis=dict(
+            title='Категория',
+            tickangle=45
+        ),
+        yaxis=dict(
+            title='Изменение цены (%)',
+            side='left',
+            showgrid=True,
+            gridcolor=COLORS['grid'],
+            zeroline=True,
+            zerolinecolor=COLORS['grid']
+        ),
+        yaxis2=dict(
+            title='Изменение объема (%)',
+            side='right',
+            overlaying='y',
+            showgrid=False,
+            zeroline=True,
+            zerolinecolor=COLORS['grid']
+        ),
+        legend=dict(
+            x=1.1,
+            y=1,
+            bgcolor='rgba(255, 255, 255, 0.1)'
+        ),
+        showlegend=True
+    )
+    
+    # Добавляем аннотации для корреляции
+    correlations = []
+    for idx, row in merged_data.iterrows():
+        if abs(row['manuf_price_change']) > 5 or abs(row['manuf_volume_change']) > 5:
+            if row['manuf_price_change'] * row['manuf_volume_change'] < 0:
+                correlations.append(f"• {row['category_name']}: Отрицательная корреляция")
+            elif row['manuf_price_change'] * row['manuf_volume_change'] > 0:
+                correlations.append(f"• {row['category_name']}: Положительная корреляция")
+    
+    if correlations:
+        correlation_text = "Значимые корреляции:<br>" + "<br>".join(correlations)
+        fig.add_annotation(
+            x=1.3,
+            y=0.5,
+            xref="paper",
+            yref="paper",
+            text=correlation_text,
+            showarrow=False,
+            font=dict(size=10),
+            align="left",
+            bgcolor='rgba(255, 255, 255, 0.1)',
+            bordercolor=COLORS['grid'],
+            borderwidth=1
+        )
+    
+    return apply_dark_theme(fig)
+
+def apply_dark_theme(fig):
+    fig.update_layout(
+        template='plotly_dark',
+        font=dict(color='white')
+    )
+    return fig

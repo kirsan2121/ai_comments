@@ -14,7 +14,8 @@ from utils.visualization import (
     create_market_share_charts,
     calculate_metrics,
     create_chain_analysis_charts,
-    calculate_chain_metrics
+    calculate_chain_metrics,
+    create_manufacturer_market_comparison
 )
 
 # Set up logging
@@ -149,6 +150,35 @@ try:
     
     st.subheader("Топ продуктов")
     st.plotly_chart(top_products_fig, use_container_width=True)
+
+    # Добавляем новый раздел для анализа производителей
+    st.header("Анализ производителей")
+
+    # Получаем список производителей
+    producers = df_categories['producer_name'].unique().tolist()
+
+    # Фильтр производителей
+    selected_producer = st.selectbox(
+        "Выберите производителя для анализа",
+        producers,
+        key='producer_select'
+    )
+
+    # Создаем график сравнения с рынком
+    if selected_producer:
+        st.plotly_chart(
+            create_manufacturer_market_comparison(df_categories, selected_producer),
+            use_container_width=True
+        )
+        
+        st.markdown("""
+        **Как читать график:**
+        - Сплошные линии - показатели выбранного производителя
+        - Пунктирные линии - показатели рынка
+        - Левая ось (%) - изменение цен
+        - Правая ось (%) - изменение объемов
+        - Справа показаны значимые корреляции между изменением цен и объемов
+        """)
 
 except Exception as e:
     logging.error(f"An error occurred: {str(e)}")
